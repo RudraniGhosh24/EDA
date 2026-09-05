@@ -164,7 +164,10 @@ if selected_district != "All":
 # -----------------
 # MAIN DASHBOARD
 # -----------------
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["Overview & Rates", "Geospatial Map", "District Crime Trends", "Feature Correlation", "National Macro Trends (2001-2022)"])
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    "Overview & Rates", "Geospatial Map", "District Crime Trends", 
+    "Feature Correlation", "National Macro Trends", "Advanced ML Analytics"
+])
 
 with tab1:
     st.header("Overview: Absolute Numbers vs Normalized Rates")
@@ -284,3 +287,107 @@ with tab5:
         nat_filtered = df_national[df_national['CRIME HEAD'].isin(selected_nat_crimes)]
         fig_nat_trend = px.line(nat_filtered, x='YEAR', y='Total Incidents', color='CRIME HEAD', markers=True, title="National Incidents Over Time")
         st.plotly_chart(fig_nat_trend, use_container_width=True)
+
+with tab6:
+    st.header("Advanced ML Analytics")
+    st.markdown("Using Machine Learning to study regional patterns and forecast future trends.")
+    
+    st.subheader("1. ARIMA Forecasting")
+    st.markdown("Forecast crime trends for the next 5 years (2023-2027) using the AutoRegressive Integrated Moving Average (ARIMA) model.")
+    
+    arima_crime = st.selectbox("Select Crime to Forecast:", crime_cols, index=2, key="arima_crime")
+    arima_dist = st.selectbox("Select District to Forecast:", sorted(df['District'].dropna().unique()), index=0, key="arima_dist")
+    
+    dist_data = df[df['District'] == arima_dist].sort_values('YEAR')
+    if len(dist_data) > 5:
+        try:
+            from statsmodels.tsa.arima.model import ARIMA
+            y = dist_data[arima_crime].values
+            years = dist_data['YEAR'].values
+            
+            # Simple ARIMA(5,1,0) as requested in original notebook
+            model = ARIMA(y, order=(5,1,0))
+            model_fit = model.fit()
+            forecast = model_fit.forecast(steps=5)
+            
+            future_years = [years[-1] + i for i in range(1, 6)]
+            
+            import plotly.graph_objects as go
+            fig_arima = go.Figure()
+            fig_arima.add_trace(go.Scatter(x=years, y=y, mode='lines+markers', name='Historical'))
+            fig_arima.add_trace(go.Scatter(x=future_years, y=forecast, mode='lines+markers', name='Forecast (ARIMA)', line=dict(dash='dash', color='green')))
+            fig_arima.update_layout(title=f"ARIMA Forecast: {arima_crime} in {arima_dist}", xaxis_title="Year", yaxis_title="Incidents")
+            st.plotly_chart(fig_arima, use_container_width=True)
+        except Exception as e:
+            st.warning(f"Not enough variation to train ARIMA for this district/crime. ({e})")
+    else:
+        st.warning("Not enough historical data points for this district to run ARIMA.")
+        
+    st.markdown("---")
+    st.subheader("2. Regional Clustering (PCA & DBSCAN)")
+    st.markdown("Groups districts with similar socio-demographic and crime profiles using Principal Component Analysis and Density-Based Clustering.")
+    
+    try:
+        from sklearn.preprocessing import StandardScaler
+        from sklearn.decomposition import PCA
+        from sklearn.cluster import DBSCAN
+        
+        # Take the most recent year data for clustering
+        latest_year = df['YEAR'].max()
+        cluster_df = df[df['YEAR'] == latest_year].dropna(subset=crime_cols + ['Female Population'])
+        
+        if not cluster_df.empty:
+            X = cluster_df[crime_cols]
+            X_scaled = StandardScaler().fit_transform(X)
+            
+            pca = PCA(n_components=2)
+            X_pca = pca.fit_transform(X_scaled)
+            
+            dbscan = DBSCAN(eps=1.5, min_samples=3)
+            clusters = dbscan.fit_predict(X_pca)
+            
+            cluster_df['PCA1'] = X_pca[:, 0]
+            cluster_df['PCA2'] = X_pca[:, 1]
+            cluster_df['Cluster'] = [str(c) if c != -1 else 'Outlier' for c in clusters]
+            
+            fig_cluster = px.scatter(
+                cluster_df, x='PCA1', y='PCA2', color='Cluster',
+                hover_data=['state', 'District'] + crime_cols[:2],
+                title=f"PCA & DBSCAN Regional Clusters (Year {int(latest_year)})"
+            )
+            st.plotly_chart(fig_cluster, use_container_width=True)
+    except Exception as e:
+        st.error(f"Clustering failed: {e}")
+
+    st.markdown("---")
+    st.subheader("3. Feature Selection (Lasso & RFE)")
+    st.markdown("Identifying the most critical crimes that predict the overall normalized **Crime Rate** using Embedded and Wrapper methods.")
+    
+    try:
+        from sklearn.linear_model import Lasso, LinearRegression
+        from sklearn.feature_selection import RFE
+        
+        clean_ml = df.dropna(subset=crime_cols + ['Crime Rate (per 100k women)'])
+        if len(clean_ml) > 100:
+            X_fs = clean_ml[crime_cols]
+            y_fs = clean_ml['Crime Rate (per 100k women)']
+            X_fs_scaled = StandardScaler().fit_transform(X_fs)
+            
+            lasso = Lasso(alpha=0.1)
+            lasso.fit(X_fs_scaled, y_fs)
+            lasso_feats = X_fs.columns[lasso.coef_ != 0].tolist()
+            
+            lr = LinearRegression()
+            rfe = RFE(estimator=lr, n_features_to_select=3)
+            rfe.fit(X_fs_scaled, y_fs)
+            rfe_feats = X_fs.columns[rfe.support_].tolist()
+            
+            c1, c2 = st.columns(2)
+            with c1:
+                st.info("**Lasso Regression (Embedded)** Selected Features:")
+                st.write(lasso_feats if lasso_feats else "None strictly selected by Lasso")
+            with c2:
+                st.info("**Recursive Feature Elimination (RFE)** Top 3 Features:")
+                st.write(rfe_feats)
+    except Exception as e:
+        st.error(f"Feature selection failed: {e}")
