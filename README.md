@@ -34,3 +34,7 @@ We combined two major datasets:
 * `EDA_Review3.ipynb`, `EDA_final1.ipynb`: Core notebooks showcasing data preprocessing, PCA, and static plots.
 * `all_done_2.csv`, `cleaned_dataset.csv`: Cleaned and merged data files.
 * `extra/`: Additional notebooks and unmerged CSV files from early EDA stages.
+
+## Citations
+
+- Patel, Anjum (2022), “Crime Against Women Dataset for Dark Spot identification in India”, Mendeley Data, V1, doi: [10.17632/whrdh8c5zb.1](https://doi.org/10.17632/whrdh8c5zb.1)
