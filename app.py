@@ -366,6 +366,7 @@ with tab6:
     try:
         from sklearn.linear_model import Lasso, LinearRegression
         from sklearn.feature_selection import RFE
+        from sklearn.preprocessing import StandardScaler
         
         clean_ml = df.dropna(subset=crime_cols + ['Crime Rate (per 100k women)'])
         if len(clean_ml) > 100:
