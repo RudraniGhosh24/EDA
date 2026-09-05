@@ -27,21 +27,6 @@ We combined two major datasets:
    - *Urbanization Rate* (%)
    These features can be interactively plotted against crime rates using the Scatter Analysis and Correlation Heatmap tabs.
 
-## How to Run the Dashboard
-
-1. Clone this repository:
-   ```bash
-   git clone https://github.com/RudraniGhosh24/EDA.git
-   cd EDA
-   ```
-2. Install the required dependencies:
-   ```bash
-   pip install streamlit pandas plotly requests statsmodels
-   ```
-3. Run the Streamlit app:
-   ```bash
-   streamlit run app.py
-   ```
 
 ## Repository Structure
 
