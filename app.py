@@ -36,9 +36,31 @@ def load_and_preprocess_data():
     
     df_crimes['District'] = df_crimes['District'].astype(str).str.strip().str.upper()
     
+    # Strip police jurisdiction suffixes to fuse them into their geographic districts
+    suffixes_to_remove = [
+        r'\bCITY\b', r'\bCOMMR\.\b', r'\bRURAL\b', r'\bURBAN\b',
+        r'\bRAILWAY\b', r'\bRLY\.\b', r'\bRLY\b', r'\bPOLICE\b', r'\bDISTRICT\b'
+    ]
+    for suffix in suffixes_to_remove:
+        df_crimes['District'] = df_crimes['District'].str.replace(suffix, '', regex=True)
+    
+    df_crimes['District'] = df_crimes['District'].str.replace(r'[^A-Z ]', '', regex=True).str.strip()
+    
     # Remove aggregate totals to prevent double-counting
     df_crimes = df_crimes[~df_crimes['state'].str.contains('TOTAL', na=False)]
     df_crimes = df_crimes[~df_crimes['District'].str.contains('TOTAL', na=False)]
+    
+    # Define crime columns safely
+    crime_cols = ['MURDER', 'ATTEMPT TO MURDER', 'RAPE', 'CUSTODIAL RAPE', 'OTHER RAPE',
+                  'KIDNAPPING & ABDUCTION', 'DOWRY DEATHS', 'ASSAULT ON WOMEN WITH INTENT TO OUTRAGE HER MODESTY',
+                  'INSULT TO MODESTY OF WOMEN', 'CRUELTY BY HUSBAND OR HIS RELATIVES', 'IMPORTATION OF GIRLS FROM FOREIGN COUNTRIES']
+    crime_cols = [c for c in crime_cols if c in df_crimes.columns]
+
+    for c in crime_cols:
+        df_crimes[c] = pd.to_numeric(df_crimes[c], errors='coerce').fillna(0)
+        
+    # FUSE subdivisions (e.g. Ahmedabad City + Rural) by summing crimes per year
+    df_crimes = df_crimes.groupby(['state', 'District', 'YEAR'])[crime_cols].sum().reset_index()
 
     df_census['state'] = df_census['state'].astype(str).str.strip().str.upper()
     state_mapping = {
