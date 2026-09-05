@@ -20,13 +20,25 @@ def load_and_preprocess_data():
 
     # 2. Standardize Names for Merging
     df_crimes['state'] = df_crimes['state'].astype(str).str.strip().str.upper()
+    df_crimes['state'] = df_crimes['state'].str.replace('STATE : ', '', regex=False)
     df_crimes['state'] = df_crimes['state'].replace({
-        'MADHYA PRADESH  ': 'MADHYA PRADESH', 
-        'A&N ISLANDS': 'A & N ISLANDS', 
+        'A& N ISLANDS': 'A & N ISLANDS',
+        'A&N ISLANDS': 'A & N ISLANDS',
+        'CHATTISGARH': 'CHHATTISGARH',
         'D&N HAVELI': 'D & N HAVELI',
-        'DELHI UT': 'DELHI UT'
+        'DAMAN': 'DAMAN & DIU',
+        'DIU': 'DAMAN & DIU',
+        'DELHI': 'DELHI UT',
+        'MADHYA PRADESH  ': 'MADHYA PRADESH', 
+        'MADHYAPRADESH': 'MADHYA PRADESH',
+        'TAMILNADU': 'TAMIL NADU'
     })
+    
     df_crimes['District'] = df_crimes['District'].astype(str).str.strip().str.upper()
+    
+    # Remove aggregate totals to prevent double-counting
+    df_crimes = df_crimes[~df_crimes['state'].str.contains('TOTAL', na=False)]
+    df_crimes = df_crimes[~df_crimes['District'].str.contains('TOTAL', na=False)]
 
     df_census['state'] = df_census['state'].astype(str).str.strip().str.upper()
     state_mapping = {
