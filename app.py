@@ -48,6 +48,10 @@ def load_and_preprocess_data():
 
     # Merge Datasets
     df = pd.merge(df_crimes, df_census[['state', 'District', 'Female', 'persons', 'Female lit_Rate', 'Male', 'rural']], on=['state', 'District'], how='left')
+    
+    # Ensure demographic columns are numeric (some contain '-')
+    for col in ['Female', 'persons', 'Male', 'rural']:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
 
     # 3. Feature Engineering & Normalization
     df['Female Population'] = df['Female'].fillna(df['Male']) 
@@ -72,8 +76,11 @@ def load_and_preprocess_data():
     )
     
     df['Gender Ratio (F per 1000 M)'] = (df['Female'] / df['Male']) * 1000
-    if 'Male Literacy Rate' in df_census.columns: # fallback if not present
-        df['Literacy Gap'] = df_census['Male Literacy Rate'] - df['Female lit_Rate']
+    if 'Male lit_Rate' in df_census.columns: # fallback if not present
+        # Ensure lit_rate columns are numeric
+        df['Male lit_Rate'] = pd.to_numeric(df_census['Male lit_Rate'], errors='coerce')
+        df['Female lit_Rate'] = pd.to_numeric(df['Female lit_Rate'], errors='coerce')
+        df['Literacy Gap'] = df['Male lit_Rate'] - df['Female lit_Rate']
     else:
         df['Literacy Gap'] = None
     
