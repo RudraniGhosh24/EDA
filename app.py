@@ -187,11 +187,18 @@ with tab2:
         }).reset_index()
         
         state_agg['state_title'] = state_agg['state'].str.title()
+        
+        # Historical data for J&K includes Ladakh. The modern map splits them.
+        # We duplicate the J&K row to color Ladakh with the same historical rate.
+        jk_row = state_agg[state_agg['state_title'] == 'Jammu & Kashmir'].copy()
+        if not jk_row.empty:
+            jk_row['state_title'] = 'Ladakh'
+            state_agg = pd.concat([state_agg, jk_row], ignore_index=True)
+            
         state_agg['state_title'] = state_agg['state_title'].replace({
             'Andaman & Nicobar Island': 'Andaman & Nicobar Islands',
             'Arunachal Pradesh': 'Arunanchal Pradesh', 
             'Delhi Ut': 'NCT of Delhi',
-            'Jammu & Kashmir': 'Jammu & Kashmir',
             'Odisha': 'Orissa'
         })
         
