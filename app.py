@@ -360,16 +360,31 @@ with tab6:
             forecast = forecast_result.predicted_mean
             conf_int = forecast_result.conf_int(alpha=0.05)
             
+            # statsmodels might return a numpy array or a DataFrame depending on the version
+            if isinstance(conf_int, pd.DataFrame):
+                lower_bound = conf_int.iloc[:, 0].tolist()
+                upper_bound = conf_int.iloc[:, 1].tolist()
+            else:
+                lower_bound = conf_int[:, 0].tolist()
+                upper_bound = conf_int[:, 1].tolist()
+            
+            # To prevent a visual gap in the plot, connect the forecast line to the last historical point
             future_years = [int(years[-1]) + i for i in range(1, 6)]
+            plot_forecast_years = [int(years[-1])] + future_years
+            plot_forecast_y = [y[-1]] + forecast.tolist()
+            
+            # For the confidence interval band, we also need to start at the last historical point
+            plot_lower = [y[-1]] + lower_bound
+            plot_upper = [y[-1]] + upper_bound
             
             fig_arima = go.Figure()
             fig_arima.add_trace(go.Scatter(x=years.tolist(), y=y.tolist(), mode='lines+markers', name='Historical', line=dict(color='royalblue')))
-            fig_arima.add_trace(go.Scatter(x=future_years, y=forecast.tolist(), mode='lines+markers', name='Forecast', line=dict(dash='dash', color='green')))
+            fig_arima.add_trace(go.Scatter(x=plot_forecast_years, y=plot_forecast_y, mode='lines+markers', name='Forecast', line=dict(dash='dash', color='green')))
             
             # Confidence interval band
             fig_arima.add_trace(go.Scatter(
-                x=future_years + future_years[::-1],
-                y=conf_int.iloc[:, 1].tolist() + conf_int.iloc[:, 0].tolist()[::-1],
+                x=plot_forecast_years + plot_forecast_years[::-1],
+                y=plot_upper + plot_lower[::-1],
                 fill='toself', fillcolor='rgba(0,200,0,0.1)', line=dict(color='rgba(255,255,255,0)'),
                 name='95% Confidence Interval'
             ))
