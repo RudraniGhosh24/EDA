@@ -528,13 +528,38 @@ with tab7:
         identified_estimand = model.identify_effect(proceed_when_unidentifiable=True)
         estimate = model.estimate_effect(identified_estimand, method_name="backdoor.linear_regression")
         
-        c1, c2 = st.columns([1, 2])
+        st.write("### The Causal Model (DAG)")
+        st.markdown("To isolate the causal effect of the Literacy Gap on Crime Rates, we must close the **backdoor paths**—variables that cause both the treatment and the outcome. Here, **Urbanization** and **Gender Ratio** act as confounding variables.")
+        
+        # Render the DAG visually instead of just code
+        st.graphviz_chart(causal_graph)
+        
+        st.write("### Identification & Estimation Logic")
+        c1, c2 = st.columns(2)
         with c1:
-            st.write("**Assumed Causal DAG:**")
-            st.code(causal_graph, language='dot')
+            st.info("**Identified Estimand (Backdoor Criterion):**\n"
+                    "The algorithm determined that to find the true causal effect, we must condition on the confounders:\n"
+                    "* `Urbanization`\n"
+                    "* `Gender_Ratio`\n\n"
+                    "By controlling for these, we block spurious correlations.")
         with c2:
             st.success(f"**Estimated Causal Effect:** {estimate.value:.2f}")
-            st.markdown(f"**Interpretation:** Moving a district from a 'Low Literacy Gap' to a 'High Literacy Gap' causes the Crime Rate to change by **{estimate.value:.2f}** incidents per 100k women, holding Urbanization and Gender Ratio constant.")
+            st.markdown(f"**Interpretation:** Controlling for confounding factors, shifting a district from a 'Low Literacy Gap' to a 'High Literacy Gap' causes the Crime Rate to increase by **{estimate.value:.2f}** incidents per 100k women.")
+            
+        # Add a visual calculation/comparison graph
+        st.write("### Effect Calculation Comparison")
+        import plotly.express as px
+        # Compare actual raw difference vs estimated causal difference
+        raw_diff = causal_df[causal_df['High_Literacy_Gap'] == True]['Crime_Rate'].mean() - causal_df[causal_df['High_Literacy_Gap'] == False]['Crime_Rate'].mean()
+        
+        comp_df = pd.DataFrame({
+            'Metric': ['Raw Correlation Difference', 'True Causal Effect (DoWhy)'],
+            'Difference in Crime Rate': [raw_diff, estimate.value]
+        })
+        fig_effect = px.bar(comp_df, x='Metric', y='Difference in Crime Rate', color='Metric', 
+                            title="Raw Correlation vs. True Causal Effect",
+                            color_discrete_sequence=['gray', 'green'])
+        st.plotly_chart(fig_effect, use_container_width=True)
             
     except Exception as e:
         st.error(f"DoWhy Causal Inference failed: {e}. Note: `dowhy` and `networkx` must be installed.")
