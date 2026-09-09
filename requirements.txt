@@ -7,3 +7,9 @@ scikit-learn
 dowhy
 pgmpy
 networkx
+ruptures
+shap
+xgboost
+geopandas
+libpysal
+esda

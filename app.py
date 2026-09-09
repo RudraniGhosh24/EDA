@@ -239,6 +239,42 @@ with tab2:
         )
         fig_map.update_geos(fitbounds="locations", visible=False)
         st.plotly_chart(fig_map, use_container_width=True)
+        
+        st.subheader("Spatial Autocorrelation (Global Moran's I)")
+        st.markdown("Does crime cluster geographically? A positive Moran's I indicates that high-crime states are physically clustered next to other high-crime states (and low next to low). A value near 0 means crime is randomly distributed.")
+        try:
+            import geopandas as gpd
+            from libpysal.weights import Queen
+            from esda.moran import Moran
+            
+            gdf = gpd.GeoDataFrame.from_features(india_geojson["features"])
+            gdf = gdf.rename(columns={'ST_NM': 'state_title'})
+            
+            # Merge geometry with crime data
+            map_df = gdf.merge(state_agg, on='state_title', how='inner')
+            
+            if not map_df.empty and len(map_df) > 5:
+                # Create spatial weights
+                w = Queen.from_dataframe(map_df)
+                w.transform = 'r'
+                
+                # Calculate Moran's I
+                y = map_df['Crime Rate (per 100k women)'].values
+                moran = Moran(y, w)
+                
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.metric("Global Moran's I", f"{moran.I:.3f}")
+                with c2:
+                    p_val = moran.p_sim
+                    st.metric("p-value (Statistical Significance)", f"{p_val:.3f}")
+                    
+                if p_val < 0.05 and moran.I > 0:
+                    st.success("**Significant Spatial Clustering Detected!** High crime rates spill over into neighboring states. This violates standard regression assumptions (which assume independence) and justifies the use of Spatial Econometrics models (SAR/SEM) in formal research.")
+                else:
+                    st.info("No significant spatial clustering detected for this timeframe.")
+        except Exception as e:
+            st.error(f"Spatial Autocorrelation failed: {e}. Note: `geopandas`, `libpysal`, `esda` must be installed.")
     except Exception as e:
         st.error(f"Could not load map: {e}")
 
@@ -325,6 +361,46 @@ with tab5:
         nat_filtered = df_national[df_national['CRIME HEAD'].isin(selected_nat_crimes)]
         fig_nat_trend = px.line(nat_filtered, x='YEAR', y='Total Incidents', color='CRIME HEAD', markers=True, title="National Incidents Over Time")
         st.plotly_chart(fig_nat_trend, use_container_width=True)
+        
+        st.subheader("Automated Change-Point Detection (Ruptures)")
+        st.markdown("Instead of assuming when policies took effect, this algorithm automatically scans the time series to detect statistically significant structural breaks (years where the underlying mean/variance fundamentally shifted).")
+        try:
+            import ruptures as rpt
+            import numpy as np
+            
+            c_crime = st.selectbox("Select Crime for Change-Point Analysis:", selected_nat_crimes)
+            cp_data = nat_filtered[nat_filtered['CRIME HEAD'] == c_crime].sort_values('YEAR')
+            
+            if len(cp_data) > 10:
+                signal = cp_data['Total Incidents'].values
+                # Use Pelt algorithm for exact search
+                algo = rpt.Pelt(model="rbf").fit(signal)
+                result = algo.predict(pen=10)
+                
+                # result contains the indices of change points
+                # The last index is always the length of the signal, so we ignore it
+                cp_indices = result[:-1]
+                
+                fig_cp = go.Figure()
+                fig_cp.add_trace(go.Scatter(x=cp_data['YEAR'], y=signal, mode='lines+markers', name=c_crime, line=dict(color='indigo')))
+                
+                detected_years = []
+                for cp in cp_indices:
+                    cp_year = cp_data.iloc[cp]['YEAR']
+                    detected_years.append(str(cp_year))
+                    fig_cp.add_vline(x=cp_year, line_dash="dash", line_color="red", annotation_text=f"Break: {cp_year}", annotation_position="top left")
+                
+                fig_cp.update_layout(title=f"Detected Structural Breaks in {c_crime}", xaxis_title="Year", yaxis_title="Total Incidents")
+                st.plotly_chart(fig_cp, use_container_width=True)
+                
+                if detected_years:
+                    st.success(f"**Data-Driven Finding:** The algorithm mathematically detected structural shifts in the years: **{', '.join(detected_years)}**. Does this align with major legislation (like the 2013 Amendment) or socio-political events?")
+                else:
+                    st.info("No statistically significant structural breaks detected for this penalty level.")
+            else:
+                st.warning("Not enough data points for change-point detection.")
+        except Exception as e:
+            st.error(f"Change-Point Detection failed: {e}")
 
 with tab6:
     st.header("Advanced ML Analytics")
@@ -477,6 +553,53 @@ with tab6:
                 st.write(rfe_feats)
     except Exception as e:
         st.error(f"Feature selection failed: {e}")
+
+    st.markdown("---")
+    st.subheader("4. SHAP Explainability (XAI)")
+    st.markdown("While RFE tells us which features matter globally, SHAP (SHapley Additive exPlanations) tells us **why** a specific district is predicted to have high or low crime, breaking down the exact contribution of each factor.")
+    
+    try:
+        import shap
+        from xgboost import XGBRegressor
+        import matplotlib.pyplot as plt
+        
+        shap_cols = ['Urbanization Rate (%)', 'Literacy Gap', 'Gender Ratio (F per 1000 M)', 'Female lit_Rate']
+        shap_cols = [c for c in shap_cols if c in df.columns]
+        
+        shap_df = df.dropna(subset=shap_cols + ['Crime Rate (per 100k women)', 'state', 'District']).copy()
+        
+        if not shap_df.empty:
+            X_shap = shap_df[shap_cols]
+            y_shap = shap_df['Crime Rate (per 100k women)']
+            
+            # Train a non-linear model
+            xgb_model = XGBRegressor(n_estimators=100, random_state=42)
+            xgb_model.fit(X_shap, y_shap)
+            
+            explainer = shap.Explainer(xgb_model)
+            shap_values = explainer(X_shap)
+            
+            c1, c2 = st.columns([1, 2])
+            with c1:
+                shap_state = st.selectbox("Select State for SHAP:", sorted(shap_df['state'].unique()), key='shap_state')
+                districts_in_state = sorted(shap_df[shap_df['state'] == shap_state]['District'].unique())
+                shap_dist = st.selectbox("Select District:", districts_in_state, key='shap_dist')
+            
+            with c2:
+                idx = shap_df[(shap_df['state'] == shap_state) & (shap_df['District'] == shap_dist)].index[0]
+                # Re-index to match X_shap integer indexing
+                iloc_idx = X_shap.index.get_loc(idx)
+                
+                st.write(f"**SHAP Waterfall Plot for {shap_dist}, {shap_state}**")
+                
+                fig_shap, ax_shap = plt.subplots(figsize=(6, 4))
+                shap.plots.waterfall(shap_values[iloc_idx], show=False)
+                st.pyplot(fig_shap)
+                
+                st.caption(f"**Interpretation:** The baseline (average) crime rate is {explainer.expected_value:.2f}. The red bars push the predicted crime rate higher for this specific district, while blue bars pull it lower, resulting in the final predicted rate shown at the top.")
+    except Exception as e:
+        st.error(f"SHAP Explainability failed: {e}. Note: `shap` and `xgboost` must be installed.")
+
 with tab7:
     st.header("Causal & Probabilistic Machine Learning")
     st.markdown("Moving beyond correlation and point-predictions to understand **why** crimes occur and quantify **uncertainty**.")
@@ -780,3 +903,45 @@ with tab7:
         
     except Exception as e:
         st.error(f"Bayesian Network failed: {e}. Note: `pgmpy` must be installed.")
+
+    st.markdown("---")
+    st.subheader("6. Hierarchical (Multilevel) Modeling")
+    st.markdown("Districts are nested within states. A standard regression ignores this hierarchy. A mixed-effects model partitions the variance in crime rates into state-level effects (like state policies) and district-level demographics.")
+    
+    try:
+        import statsmodels.formula.api as smf
+        
+        hier_df = df.dropna(subset=['Crime Rate (per 100k women)', 'Urbanization Rate (%)', 'Literacy Gap', 'state']).copy()
+        
+        # We must rename columns to be formula-friendly
+        hier_df = hier_df.rename(columns={
+            'Crime Rate (per 100k women)': 'CrimeRate',
+            'Urbanization Rate (%)': 'Urbanization',
+            'Literacy Gap': 'LiteracyGap'
+        })
+        
+        # Fit a Mixed Linear Model: CrimeRate ~ Urbanization + LiteracyGap, with Random Intercepts for 'state'
+        md = smf.mixedlm("CrimeRate ~ Urbanization + LiteracyGap", hier_df, groups=hier_df["state"])
+        mdf = md.fit()
+        
+        st.write("### Model Results")
+        
+        # Extract Variance Components
+        state_var = mdf.cov_re.iloc[0,0]
+        residual_var = mdf.scale
+        total_var = state_var + residual_var
+        icc = state_var / total_var if total_var > 0 else 0
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("State-Level Variance (Random Effect)", f"{state_var:.2f}")
+            st.metric("District-Level Variance (Residual)", f"{residual_var:.2f}")
+        with col2:
+            st.metric("Intraclass Correlation Coefficient (ICC)", f"{icc:.1%}")
+            st.info(f"**Insight:** {icc:.1%} of the variation in Crime Rates is due to state-level differences (e.g., governance, state policy). The remaining {1-icc:.1%} is due to local district-level factors.")
+            
+        st.write("### Fixed Effects (District-Level Drivers)")
+        st.dataframe(mdf.summary().tables[1])
+        
+    except Exception as e:
+        st.error(f"Hierarchical Modeling failed: {e}")
