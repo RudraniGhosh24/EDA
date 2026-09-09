@@ -594,7 +594,6 @@ with tab7:
         except ImportError:
             from pgmpy.models import BayesianNetwork
             
-        from pgmpy.estimators import MaximumLikelihoodEstimator
         from pgmpy.inference import VariableElimination
         
         bn_df = df.dropna(subset=['Crime Rate (per 100k women)', 'Literacy Gap', 'Urbanization Rate (%)']).copy()
@@ -607,7 +606,18 @@ with tab7:
         train_data = bn_df[['Urban_Level', 'LitGap_Level', 'Crime_Level']]
         
         bn_model = BayesianNetwork([('Urban_Level', 'Crime_Level'), ('LitGap_Level', 'Crime_Level')])
-        bn_model.fit(train_data, estimator=MaximumLikelihoodEstimator)
+        
+        # In newer pgmpy versions, fit() defaults to the correct MLE if no estimator is passed.
+        # If it requires an explicit one, we try to import and pass DiscreteMLE().
+        try:
+            bn_model.fit(train_data)
+        except Exception:
+            try:
+                from pgmpy.estimators import DiscreteMLE
+                bn_model.fit(train_data, estimator=DiscreteMLE())
+            except Exception:
+                from pgmpy.estimators import MaximumLikelihoodEstimator
+                bn_model.fit(train_data, estimator=MaximumLikelihoodEstimator)
         
         infer = VariableElimination(bn_model)
         
