@@ -259,8 +259,16 @@ with tab4:
     features = ['Crime Rate (per 100k women)', 'Total Crimes Against Women', 'Urbanization Rate (%)', 'Literacy Gap', 'Gender Ratio (F per 1000 M)', 'Female lit_Rate']
     available_features = [f for f in features if f in filtered_df.columns and filtered_df[f].notna().sum() > 0]
     
-    if available_features:
-        corr = filtered_df[available_features].corr()
+    vif_mode = st.radio("Select Feature Set for Analysis:", ["Socio-Demographics", "Crime Categories"], horizontal=True)
+    if vif_mode == "Socio-Demographics":
+        corr_features = available_features
+        vif_features = [f for f in available_features if f not in ['Crime Rate (per 100k women)', 'Total Crimes Against Women']]
+    else:
+        corr_features = crime_cols
+        vif_features = crime_cols
+
+    if corr_features:
+        corr = filtered_df[corr_features].corr()
         fig_corr = px.imshow(corr, text_auto=".2f", aspect="auto", color_continuous_scale='RdBu_r')
         st.plotly_chart(fig_corr, use_container_width=True)
         
@@ -271,8 +279,6 @@ with tab4:
             from statsmodels.stats.outliers_influence import variance_inflation_factor
             import statsmodels.api as sm
             
-            # Select independent features (excluding target metrics)
-            vif_features = [f for f in available_features if f not in ['Crime Rate (per 100k women)', 'Total Crimes Against Women']]
             vif_data = filtered_df.dropna(subset=vif_features)[vif_features]
             
             # VIF requires a constant (intercept) to be calculated correctly
@@ -282,6 +288,7 @@ with tab4:
             vif_df["Feature"] = vif_data.columns
             vif_df["VIF"] = [variance_inflation_factor(vif_data.values, i) for i in range(vif_data.shape[1])]
             vif_df = vif_df[vif_df['Feature'] != 'const'].sort_values('VIF', ascending=False)
+
             
             c1, c2 = st.columns([1, 2])
             with c1:
@@ -611,7 +618,65 @@ with tab7:
         st.error(f"DoWhy Causal Inference failed: {e}. Note: `dowhy` and `networkx` must be installed.")
 
     st.markdown("---")
-    st.subheader("3. Probabilistic Forecasting (Gaussian Processes)")
+    st.subheader("3. Crime-to-Crime Causal Inference")
+    st.markdown("Does one type of crime *cause* an increase in another, or are they just co-occurring due to external factors like urbanization? Let's check if their correlation holds up as causation.")
+    
+    try:
+        c1, c2 = st.columns(2)
+        with c1:
+            treatment_crime = st.selectbox("Select 'Cause' Crime (Treatment):", crime_cols, index=crime_cols.index('KIDNAPPING & ABDUCTION') if 'KIDNAPPING & ABDUCTION' in crime_cols else 0)
+        with c2:
+            outcome_crime = st.selectbox("Select 'Effect' Crime (Outcome):", crime_cols, index=crime_cols.index('RAPE') if 'RAPE' in crime_cols else 1)
+        
+        if treatment_crime != outcome_crime:
+            cc_df = df.dropna(subset=[treatment_crime, outcome_crime, 'Urbanization Rate (%)']).copy()
+            # Clean names for DAG
+            t_name = treatment_crime.replace(' ', '_').replace('&', 'AND').replace('(', '').replace(')', '').replace('-', '_')
+            o_name = outcome_crime.replace(' ', '_').replace('&', 'AND').replace('(', '').replace(')', '').replace('-', '_')
+            cc_df = cc_df.rename(columns={
+                treatment_crime: t_name,
+                outcome_crime: o_name,
+                'Urbanization Rate (%)': 'Urbanization'
+            })
+            
+            # Binarize treatment
+            median_t = cc_df[t_name].median()
+            cc_df['High_Treatment'] = cc_df[t_name] > median_t
+            
+            cc_graph = f"""
+            digraph {{
+            Urbanization -> High_Treatment;
+            Urbanization -> {o_name};
+            High_Treatment -> {o_name};
+            }}
+            """
+            
+            model_cc = CausalModel(
+                data=cc_df,
+                treatment='High_Treatment',
+                outcome=o_name,
+                graph=cc_graph
+            )
+            
+            estimand_cc = model_cc.identify_effect(proceed_when_unidentifiable=True)
+            estimate_cc = model_cc.estimate_effect(estimand_cc, method_name="backdoor.linear_regression")
+            
+            raw_corr = cc_df[t_name].corr(cc_df[o_name])
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Raw Correlation (r)", f"{raw_corr:.2f}")
+            with col2:
+                st.metric("True Causal Effect (Incidents)", f"{estimate_cc.value:.2f}")
+            
+            st.info(f"**Interpretation:** The raw correlation is **{raw_corr:.2f}**. When controlling for urbanization as a confounder, shifting a district from 'Low' to 'High' {treatment_crime} causes an estimated increase of **{estimate_cc.value:.2f}** incidents of {outcome_crime}.")
+        else:
+            st.warning("Please select two different crimes.")
+    except Exception as e:
+        st.error(f"Crime Causal Inference failed: {e}")
+
+    st.markdown("---")
+    st.subheader("4. Probabilistic Forecasting (Gaussian Processes)")
     st.markdown("Predicting crime rates based on demographic profiles with quantified uncertainty bounds.")
     
     try:
@@ -656,7 +721,7 @@ with tab7:
         st.error(f"Gaussian Process failed: {e}")
 
     st.markdown("---")
-    st.subheader("4. Bayesian Belief Networks (Risk Assessment)")
+    st.subheader("5. Bayesian Belief Networks (Risk Assessment)")
     st.markdown("Query the conditional probability of experiencing High Crime given specific sociological conditions.")
     
     try:
