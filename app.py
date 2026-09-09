@@ -293,35 +293,67 @@ with tab6:
     st.markdown("Using Machine Learning to study regional patterns and forecast future trends.")
     
     st.subheader("1. ARIMA Forecasting")
-    st.markdown("Forecast crime trends for the next 5 years (2023-2027) using the AutoRegressive Integrated Moving Average (ARIMA) model.")
+    st.markdown("Forecast crime trends for the next 5 years using the AutoRegressive Integrated Moving Average (ARIMA) model.")
     
+    arima_level = st.radio("Forecast Level:", ["State", "District"], horizontal=True, key="arima_level")
     arima_crime = st.selectbox("Select Crime to Forecast:", crime_cols, index=2, key="arima_crime")
-    arima_dist = st.selectbox("Select District to Forecast:", sorted(df['District'].dropna().unique()), index=0, key="arima_dist")
     
-    dist_data = df[df['District'] == arima_dist].sort_values('YEAR')
-    if len(dist_data) > 5:
+    if arima_level == "State":
+        arima_region = st.selectbox("Select State:", sorted(df['state'].dropna().unique()), key="arima_state")
+        ts_data = df[df['state'] == arima_region].groupby('YEAR')[arima_crime].sum().reset_index()
+    else:
+        arima_region = st.selectbox("Select District:", sorted(df['District'].dropna().unique()), index=0, key="arima_dist")
+        ts_data = df[df['District'] == arima_region].groupby('YEAR')[arima_crime].sum().reset_index()
+    
+    ts_data = ts_data.sort_values('YEAR')
+    
+    # Fill any missing intermediate years with interpolation
+    if len(ts_data) > 1:
+        all_years = pd.DataFrame({'YEAR': range(int(ts_data['YEAR'].min()), int(ts_data['YEAR'].max()) + 1)})
+        ts_data = all_years.merge(ts_data, on='YEAR', how='left')
+        ts_data[arima_crime] = ts_data[arima_crime].interpolate(method='linear').fillna(0)
+    
+    if len(ts_data) >= 6:
         try:
             from statsmodels.tsa.arima.model import ARIMA
-            y = dist_data[arima_crime].values
-            years = dist_data['YEAR'].values
-            
-            # Simple ARIMA(5,1,0) as requested in original notebook
-            model = ARIMA(y, order=(5,1,0))
-            model_fit = model.fit()
-            forecast = model_fit.forecast(steps=5)
-            
-            future_years = [years[-1] + i for i in range(1, 6)]
-            
             import plotly.graph_objects as go
+            
+            y = ts_data[arima_crime].values.astype(float)
+            years = ts_data['YEAR'].values.astype(int)
+            
+            # Auto-select simpler order if series is short
+            p = min(5, len(y) - 2)
+            model = ARIMA(y, order=(p, 1, 0))
+            model_fit = model.fit()
+            forecast_result = model_fit.get_forecast(steps=5)
+            forecast = forecast_result.predicted_mean
+            conf_int = forecast_result.conf_int(alpha=0.05)
+            
+            future_years = [int(years[-1]) + i for i in range(1, 6)]
+            
             fig_arima = go.Figure()
-            fig_arima.add_trace(go.Scatter(x=years, y=y, mode='lines+markers', name='Historical'))
-            fig_arima.add_trace(go.Scatter(x=future_years, y=forecast, mode='lines+markers', name='Forecast (ARIMA)', line=dict(dash='dash', color='green')))
-            fig_arima.update_layout(title=f"ARIMA Forecast: {arima_crime} in {arima_dist}", xaxis_title="Year", yaxis_title="Incidents")
+            fig_arima.add_trace(go.Scatter(x=years.tolist(), y=y.tolist(), mode='lines+markers', name='Historical', line=dict(color='royalblue')))
+            fig_arima.add_trace(go.Scatter(x=future_years, y=forecast.tolist(), mode='lines+markers', name='Forecast', line=dict(dash='dash', color='green')))
+            
+            # Confidence interval band
+            fig_arima.add_trace(go.Scatter(
+                x=future_years + future_years[::-1],
+                y=conf_int.iloc[:, 1].tolist() + conf_int.iloc[:, 0].tolist()[::-1],
+                fill='toself', fillcolor='rgba(0,200,0,0.1)', line=dict(color='rgba(255,255,255,0)'),
+                name='95% Confidence Interval'
+            ))
+            
+            fig_arima.update_layout(
+                title=f"ARIMA Forecast: {arima_crime} in {arima_region}",
+                xaxis_title="Year", yaxis_title="Total Incidents"
+            )
             st.plotly_chart(fig_arima, use_container_width=True)
+            
+            st.caption(f"Model: ARIMA({p},1,0) · AIC: {model_fit.aic:.1f} · {len(y)} data points")
         except Exception as e:
-            st.warning(f"Not enough variation to train ARIMA for this district/crime. ({e})")
+            st.warning(f"Could not fit ARIMA for this selection. Try a different region or crime. ({e})")
     else:
-        st.warning("Not enough historical data points for this district to run ARIMA.")
+        st.warning(f"Only {len(ts_data)} year(s) of data available for {arima_region}. Need at least 6 for ARIMA.")
         
     st.markdown("---")
     st.subheader("2. Regional Clustering (PCA & DBSCAN)")
