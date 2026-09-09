@@ -164,9 +164,9 @@ if selected_district != "All":
 # -----------------
 # MAIN DASHBOARD
 # -----------------
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "Overview & Rates", "Geospatial Map", "District Crime Trends", 
-    "Feature Correlation", "National Macro Trends", "Advanced ML Analytics"
+    "Feature Correlation", "National Macro Trends", "Advanced ML Analytics", "Causal & Probabilistic ML"
 ])
 
 with tab1:
@@ -424,3 +424,194 @@ with tab6:
                 st.write(rfe_feats)
     except Exception as e:
         st.error(f"Feature selection failed: {e}")
+with tab7:
+    st.header("Causal & Probabilistic Machine Learning")
+    st.markdown("Moving beyond correlation and point-predictions to understand **why** crimes occur and quantify **uncertainty**.")
+    
+    st.subheader("1. Causal Impact Analysis (Interrupted Time Series)")
+    st.markdown("Did the **2013 Criminal Law (Amendment) Act** (post-Nirbhaya) cause a statistically significant increase in the reporting of crimes against women? We use a Bayesian Structural Time Series (BSTS) approach to create a synthetic control.")
+    
+    try:
+        import statsmodels.api as sm
+        # National aggregate data for 'Total Crimes against Women'
+        nat_total = df_national[df_national['CRIME HEAD'] == 'Total Crimes against Women'].sort_values('YEAR')
+        if not nat_total.empty:
+            pre_period = nat_total[nat_total['YEAR'] < 2013]
+            post_period = nat_total[nat_total['YEAR'] >= 2013]
+            
+            # Simple Local Level model trained on pre-intervention
+            y_pre = pre_period['Total Incidents'].values
+            model_bsts = sm.tsa.UnobservedComponents(y_pre, 'local level')
+            res_bsts = model_bsts.fit(disp=False)
+            
+            # Forecast into post-intervention period to get the "counterfactual"
+            forecast_steps = len(post_period)
+            pred = res_bsts.get_forecast(steps=forecast_steps)
+            counterfactual = pred.predicted_mean
+            conf_int = pred.conf_int(alpha=0.05)
+            
+            import plotly.graph_objects as go
+            fig_causal = go.Figure()
+            # Actual Data
+            fig_causal.add_trace(go.Scatter(x=nat_total['YEAR'], y=nat_total['Total Incidents'], mode='lines+markers', name='Actual Reported Crimes', line=dict(color='red')))
+            # Counterfactual Forecast
+            fig_causal.add_trace(go.Scatter(x=post_period['YEAR'], y=counterfactual, mode='lines', name='Expected (Counterfactual) without 2013 Act', line=dict(dash='dash', color='blue')))
+            # Confidence Interval
+            fig_causal.add_trace(go.Scatter(
+                x=post_period['YEAR'].tolist() + post_period['YEAR'].tolist()[::-1],
+                y=conf_int.iloc[:, 1].tolist() + conf_int.iloc[:, 0].tolist()[::-1],
+                fill='toself', fillcolor='rgba(0,0,255,0.1)', line=dict(color='rgba(255,255,255,0)'),
+                name='95% CI (Counterfactual)'
+            ))
+            
+            fig_causal.add_vline(x=2013, line_width=2, line_dash="dash", line_color="black")
+            fig_causal.add_annotation(x=2013, y=nat_total['Total Incidents'].max(), text="2013 Amendment Act", showarrow=True, arrowhead=1)
+            
+            fig_causal.update_layout(title="Causal Impact of 2013 Amendment on Crime Reporting", xaxis_title="Year", yaxis_title="Total Incidents")
+            st.plotly_chart(fig_causal, use_container_width=True)
+            
+            # Calculate causal effect
+            actual_post = post_period['Total Incidents'].values
+            effect = actual_post - counterfactual
+            st.info(f"**Causal Insight:** The model estimates that the 2013 amendment *caused* an absolute increase in reporting of approximately **{int(effect.mean())}** extra cases per year compared to what would have been expected if the previous trend had continued.")
+    except Exception as e:
+        st.error(f"Causal Impact failed: {e}")
+
+    st.markdown("---")
+    st.subheader("2. Causal Graph Inference (DoWhy)")
+    st.markdown("Does the Literacy Gap *cause* higher crime rates, or are they just correlated? Using Microsoft's `DoWhy` library, we build a Directed Acyclic Graph (DAG) to estimate the true causal effect, controlling for Urbanization and Gender Ratio.")
+    
+    try:
+        import dowhy
+        from dowhy import CausalModel
+        
+        # Prepare data for causal model
+        causal_df = df.dropna(subset=['Crime Rate (per 100k women)', 'Literacy Gap', 'Urbanization Rate (%)', 'Gender Ratio (F per 1000 M)']).copy()
+        
+        # Binarize treatment for simpler visualization/computation
+        median_gap = causal_df['Literacy Gap'].median()
+        causal_df['High_Literacy_Gap'] = causal_df['Literacy Gap'] > median_gap
+        
+        # Define the Causal Graph (DAG)
+        causal_graph = """
+        digraph {
+        Urbanization -> Literacy_Gap;
+        Urbanization -> Crime_Rate;
+        Gender_Ratio -> Literacy_Gap;
+        Gender_Ratio -> Crime_Rate;
+        Literacy_Gap -> Crime_Rate;
+        }
+        """
+        
+        model = CausalModel(
+            data=causal_df,
+            treatment='High_Literacy_Gap',
+            outcome='Crime Rate (per 100k women)',
+            graph=causal_graph.replace("Literacy_Gap", "High_Literacy_Gap").replace("Crime_Rate", "Crime Rate (per 100k women)").replace("Urbanization", "Urbanization Rate (%)").replace("Gender_Ratio", "Gender Ratio (F per 1000 M)")
+        )
+        
+        identified_estimand = model.identify_effect(proceed_when_unidentifiable=True)
+        estimate = model.estimate_effect(identified_estimand, method_name="backdoor.linear_regression")
+        
+        c1, c2 = st.columns([1, 2])
+        with c1:
+            st.write("**Assumed Causal DAG:**")
+            st.code(causal_graph, language='dot')
+        with c2:
+            st.success(f"**Estimated Causal Effect:** {estimate.value:.2f}")
+            st.markdown(f"**Interpretation:** Moving a district from a 'Low Literacy Gap' to a 'High Literacy Gap' causes the Crime Rate to change by **{estimate.value:.2f}** incidents per 100k women, holding Urbanization and Gender Ratio constant.")
+            
+    except Exception as e:
+        st.error(f"DoWhy Causal Inference failed: {e}. Note: `dowhy` and `networkx` must be installed.")
+
+    st.markdown("---")
+    st.subheader("3. Probabilistic Forecasting (Gaussian Processes)")
+    st.markdown("Predicting crime rates based on demographic profiles with quantified uncertainty bounds.")
+    
+    try:
+        from sklearn.gaussian_process import GaussianProcessRegressor
+        from sklearn.gaussian_process.kernels import RBF, ConstantKernel as C
+        from sklearn.preprocessing import StandardScaler
+        import numpy as np
+        
+        gp_df = df.dropna(subset=['Urbanization Rate (%)', 'Crime Rate (per 100k women)']).copy()
+        # Take a random sample to keep GP fast
+        gp_df = gp_df.sample(n=min(500, len(gp_df)), random_state=42)
+        
+        X_gp = gp_df[['Urbanization Rate (%)']].values
+        y_gp = gp_df['Crime Rate (per 100k women)'].values
+        
+        scaler_X = StandardScaler()
+        X_gp_scaled = scaler_X.fit_transform(X_gp)
+        
+        kernel = C(1.0, (1e-3, 1e3)) * RBF(10, (1e-2, 1e2))
+        gp = GaussianProcessRegressor(kernel=kernel, n_restarts_optimizer=5, alpha=10.0)
+        gp.fit(X_gp_scaled, y_gp)
+        
+        x_pred = np.linspace(X_gp.min(), X_gp.max(), 100).reshape(-1, 1)
+        x_pred_scaled = scaler_X.transform(x_pred)
+        y_pred, sigma = gp.predict(x_pred_scaled, return_std=True)
+        
+        import plotly.graph_objects as go
+        fig_gp = go.Figure()
+        fig_gp.add_trace(go.Scatter(x=X_gp.flatten(), y=y_gp, mode='markers', name='Observed Districts', marker=dict(opacity=0.5, color='gray')))
+        fig_gp.add_trace(go.Scatter(x=x_pred.flatten(), y=y_pred, mode='lines', name='GP Mean Prediction', line=dict(color='red')))
+        fig_gp.add_trace(go.Scatter(
+            x=np.concatenate([x_pred.flatten(), x_pred.flatten()[::-1]]),
+            y=np.concatenate([y_pred - 1.96 * sigma, (y_pred + 1.96 * sigma)[::-1]]),
+            fill='toself', fillcolor='rgba(255,0,0,0.2)', line=dict(color='rgba(255,255,255,0)'),
+            name='95% Confidence Interval'
+        ))
+        
+        fig_gp.update_layout(title="Gaussian Process Regression: Crime Rate vs Urbanization", xaxis_title="Urbanization Rate (%)", yaxis_title="Crime Rate (per 100k women)")
+        st.plotly_chart(fig_gp, use_container_width=True)
+        
+    except Exception as e:
+        st.error(f"Gaussian Process failed: {e}")
+
+    st.markdown("---")
+    st.subheader("4. Bayesian Belief Networks (Risk Assessment)")
+    st.markdown("Query the conditional probability of experiencing High Crime given specific sociological conditions.")
+    
+    try:
+        from pgmpy.models import BayesianNetwork
+        from pgmpy.estimators import MaximumLikelihoodEstimator
+        from pgmpy.inference import VariableElimination
+        
+        bn_df = df.dropna(subset=['Crime Rate (per 100k women)', 'Literacy Gap', 'Urbanization Rate (%)']).copy()
+        
+        # Discretize for Bayesian Network
+        bn_df['Crime_Level'] = pd.qcut(bn_df['Crime Rate (per 100k women)'], q=3, labels=['Low', 'Medium', 'High'])
+        bn_df['Urban_Level'] = pd.qcut(bn_df['Urbanization Rate (%)'], q=3, labels=['Low', 'Medium', 'High'])
+        bn_df['LitGap_Level'] = pd.qcut(bn_df['Literacy Gap'], q=3, labels=['Low', 'Medium', 'High'])
+        
+        train_data = bn_df[['Urban_Level', 'LitGap_Level', 'Crime_Level']]
+        
+        bn_model = BayesianNetwork([('Urban_Level', 'Crime_Level'), ('LitGap_Level', 'Crime_Level')])
+        bn_model.fit(train_data, estimator=MaximumLikelihoodEstimator)
+        
+        infer = VariableElimination(bn_model)
+        
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            u_sel = st.selectbox("Urbanization Level:", ['Low', 'Medium', 'High'], key='u_sel')
+        with c2:
+            l_sel = st.selectbox("Literacy Gap Level:", ['Low', 'Medium', 'High'], key='l_sel')
+            
+        prob = infer.query(variables=['Crime_Level'], evidence={'Urban_Level': u_sel, 'LitGap_Level': l_sel})
+        
+        # Extract probabilities
+        p_low = prob.values[0]
+        p_med = prob.values[1]
+        p_high = prob.values[2]
+        
+        with c3:
+            st.metric("P(Crime = High)", f"{p_high:.1%}")
+            
+        # Plot probabilities
+        import plotly.express as px
+        fig_bn = px.bar(x=['Low', 'Medium', 'High'], y=[p_low, p_med, p_high], labels={'x': 'Crime Level', 'y': 'Probability'}, title=f"Conditional Probability of Crime given Urban={u_sel} & LitGap={l_sel}")
+        st.plotly_chart(fig_bn, use_container_width=True)
+        
+    except Exception as e:
+        st.error(f"Bayesian Network failed: {e}. Note: `pgmpy` must be installed.")

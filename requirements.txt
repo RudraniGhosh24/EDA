@@ -4,3 +4,6 @@ plotly
 requests
 statsmodels
 scikit-learn
+dowhy
+pgmpy
+networkx
