@@ -264,10 +264,41 @@ with tab4:
         fig_corr = px.imshow(corr, text_auto=".2f", aspect="auto", color_continuous_scale='RdBu_r')
         st.plotly_chart(fig_corr, use_container_width=True)
         
+        # Add VIF Multicollinearity Analysis
+        st.subheader("Multicollinearity Analysis (VIF)")
+        st.markdown("Variance Inflation Factor (VIF) measures how much the variance of an estimated regression coefficient increases when your predictors are correlated. VIF > 5 indicates problematic multicollinearity.")
+        try:
+            from statsmodels.stats.outliers_influence import variance_inflation_factor
+            import statsmodels.api as sm
+            
+            # Select independent features (excluding target metrics)
+            vif_features = [f for f in available_features if f not in ['Crime Rate (per 100k women)', 'Total Crimes Against Women']]
+            vif_data = filtered_df.dropna(subset=vif_features)[vif_features]
+            
+            # VIF requires a constant (intercept) to be calculated correctly
+            vif_data = sm.add_constant(vif_data)
+            
+            vif_df = pd.DataFrame()
+            vif_df["Feature"] = vif_data.columns
+            vif_df["VIF"] = [variance_inflation_factor(vif_data.values, i) for i in range(vif_data.shape[1])]
+            vif_df = vif_df[vif_df['Feature'] != 'const'].sort_values('VIF', ascending=False)
+            
+            c1, c2 = st.columns([1, 2])
+            with c1:
+                st.dataframe(vif_df.style.format({'VIF': '{:.2f}'}).background_gradient(cmap='Reds', subset=['VIF']))
+            with c2:
+                high_vif = vif_df[vif_df['VIF'] > 5]['Feature'].tolist()
+                if high_vif:
+                    st.warning(f"**High Multicollinearity Detected!** The following features have VIF > 5: {', '.join(high_vif)}. This means their effects overlap significantly. You should drop one or use regularized models (like Lasso/Ridge) when predicting crime.")
+                else:
+                    st.success("**No Multicollinearity Detected!** All features have a VIF under 5, meaning their independent effects on crime can be reliably isolated.")
+        except Exception as e:
+            st.error(f"VIF Calculation failed: {e}")
+        
         st.subheader("Scatter Analysis")
         c1, c2 = st.columns(2)
         with c1:
-            x_axis = st.selectbox("X-Axis", [f for f in ['Urbanization Rate (%)', 'Literacy Gap', 'Gender Ratio (F per 1000 M)'] if f in available_features])
+            x_axis = st.selectbox("X-Axis", [f for f in ['Urbanization Rate (%)', 'Literacy Gap', 'Gender Ratio (F per 1000 M)', 'Female lit_Rate'] if f in available_features])
         with c2:
             y_axis = st.selectbox("Y-Axis", ['Crime Rate (per 100k women)', 'Total Crimes Against Women'])
             
