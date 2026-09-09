@@ -448,7 +448,15 @@ with tab7:
             forecast_steps = len(post_period)
             pred = res_bsts.get_forecast(steps=forecast_steps)
             counterfactual = pred.predicted_mean
+            
+            # UnobservedComponents pred.conf_int() returns a numpy array or dataframe depending on version
             conf_int = pred.conf_int(alpha=0.05)
+            if hasattr(conf_int, 'iloc'):
+                lower_ci = conf_int.iloc[:, 0].tolist()
+                upper_ci = conf_int.iloc[:, 1].tolist()
+            else:
+                lower_ci = conf_int[:, 0].tolist()
+                upper_ci = conf_int[:, 1].tolist()
             
             import plotly.graph_objects as go
             fig_causal = go.Figure()
@@ -459,7 +467,7 @@ with tab7:
             # Confidence Interval
             fig_causal.add_trace(go.Scatter(
                 x=post_period['YEAR'].tolist() + post_period['YEAR'].tolist()[::-1],
-                y=conf_int.iloc[:, 1].tolist() + conf_int.iloc[:, 0].tolist()[::-1],
+                y=upper_ci + lower_ci[::-1],
                 fill='toself', fillcolor='rgba(0,0,255,0.1)', line=dict(color='rgba(255,255,255,0)'),
                 name='95% CI (Counterfactual)'
             ))
@@ -485,29 +493,36 @@ with tab7:
         import dowhy
         from dowhy import CausalModel
         
-        # Prepare data for causal model
+        # Prepare data for causal model - renaming columns to remove spaces for DAG parser
         causal_df = df.dropna(subset=['Crime Rate (per 100k women)', 'Literacy Gap', 'Urbanization Rate (%)', 'Gender Ratio (F per 1000 M)']).copy()
+        causal_df = causal_df.rename(columns={
+            'Crime Rate (per 100k women)': 'Crime_Rate',
+            'Urbanization Rate (%)': 'Urbanization',
+            'Gender Ratio (F per 1000 M)': 'Gender_Ratio',
+            'Literacy Gap': 'Literacy_Gap'
+        })
         
         # Binarize treatment for simpler visualization/computation
-        median_gap = causal_df['Literacy Gap'].median()
-        causal_df['High_Literacy_Gap'] = causal_df['Literacy Gap'] > median_gap
+        median_gap = causal_df['Literacy_Gap'].median()
+        causal_df['High_Literacy_Gap'] = causal_df['Literacy_Gap'] > median_gap
+        causal_df['High_Literacy_Gap'] = causal_df['High_Literacy_Gap'].astype(bool)
         
-        # Define the Causal Graph (DAG)
+        # Define the Causal Graph (DAG) with safe names
         causal_graph = """
         digraph {
-        Urbanization -> Literacy_Gap;
+        Urbanization -> High_Literacy_Gap;
         Urbanization -> Crime_Rate;
-        Gender_Ratio -> Literacy_Gap;
+        Gender_Ratio -> High_Literacy_Gap;
         Gender_Ratio -> Crime_Rate;
-        Literacy_Gap -> Crime_Rate;
+        High_Literacy_Gap -> Crime_Rate;
         }
         """
         
         model = CausalModel(
             data=causal_df,
             treatment='High_Literacy_Gap',
-            outcome='Crime Rate (per 100k women)',
-            graph=causal_graph.replace("Literacy_Gap", "High_Literacy_Gap").replace("Crime_Rate", "Crime Rate (per 100k women)").replace("Urbanization", "Urbanization Rate (%)").replace("Gender_Ratio", "Gender Ratio (F per 1000 M)")
+            outcome='Crime_Rate',
+            graph=causal_graph
         )
         
         identified_estimand = model.identify_effect(proceed_when_unidentifiable=True)
@@ -574,7 +589,11 @@ with tab7:
     st.markdown("Query the conditional probability of experiencing High Crime given specific sociological conditions.")
     
     try:
-        from pgmpy.models import BayesianNetwork
+        try:
+            from pgmpy.models import DiscreteBayesianNetwork as BayesianNetwork
+        except ImportError:
+            from pgmpy.models import BayesianNetwork
+            
         from pgmpy.estimators import MaximumLikelihoodEstimator
         from pgmpy.inference import VariableElimination
         
