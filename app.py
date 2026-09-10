@@ -367,6 +367,7 @@ with tab5:
         try:
             import ruptures as rpt
             import numpy as np
+            import plotly.graph_objects as go
             
             c_crime = st.selectbox("Select Crime for Change-Point Analysis:", selected_nat_crimes)
             cp_data = nat_filtered[nat_filtered['CRIME HEAD'] == c_crime].sort_values('YEAR')
