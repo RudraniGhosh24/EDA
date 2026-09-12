@@ -928,10 +928,6 @@ with tab7:
             hide_index=True
         )
             
-        # Plot probabilities
-        import plotly.express as px
-        fig_bn = px.bar(x=['Low', 'Medium', 'High'], y=[p_low, p_med, p_high], labels={'x': 'Crime Level', 'y': 'Probability'}, title=f"Conditional Probability of Crime given Urban={u_sel} & LitGap={l_sel}")
-        st.plotly_chart(fig_bn, use_container_width=True)
         
     except Exception as e:
         st.error(f"Bayesian Network failed: {e}. Note: `pgmpy` must be installed.")
