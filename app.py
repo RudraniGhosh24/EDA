@@ -395,6 +395,45 @@ with tab4:
                 pval = panel_model.pvalues['Q("Literacy Gap")']
                 st.metric("Coefficient", f"{coef:.4f}")
                 st.metric("P-Value", f"{pval:.4e}")
+                
+                # Generate Coefficient Plot
+                features_plot = []
+                coefs = []
+                errors_low = []
+                errors_high = []
+                
+                for feat_name, display_name in [
+                    ('Q("Literacy Gap")', 'Literacy Gap'),
+                    ('Q("Urbanization Rate (%)")', 'Urbanization'),
+                    ('Q("Gender Ratio (F per 1000 M)")', 'Gender Ratio')
+                ]:
+                    if feat_name in panel_model.params:
+                        c = panel_model.params[feat_name]
+                        ci_low, ci_high = panel_model.conf_int().loc[feat_name]
+                        features_plot.append(display_name)
+                        coefs.append(c)
+                        errors_low.append(c - ci_low)
+                        errors_high.append(ci_high - c)
+                
+                if features_plot:
+                    import plotly.graph_objects as go
+                    fig_coef = go.Figure()
+                    fig_coef.add_trace(go.Scatter(
+                        x=coefs,
+                        y=features_plot,
+                        mode='markers',
+                        error_x=dict(type='data', symmetric=False, array=errors_high, arrayminus=errors_low, color='firebrick', thickness=2),
+                        marker=dict(color='firebrick', size=12)
+                    ))
+                    fig_coef.add_vline(x=0, line_dash="dash", line_color="black", line_width=2)
+                    fig_coef.update_layout(
+                        title="Coefficient Plot (95% Confidence Intervals)",
+                        xaxis_title="Estimated Effect on Crime Rate",
+                        yaxis_title="",
+                        height=300,
+                        margin=dict(l=0, r=0, t=40, b=0)
+                    )
+                    st.plotly_chart(fig_coef, use_container_width=True)
                 if pval < 0.05:
                     st.success("Significant relationship detected, controlling for key confounders.")
                 else:
