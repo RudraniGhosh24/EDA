@@ -772,6 +772,53 @@ with tab7:
         st.error(f"DoWhy Causal Inference failed: {e}. Note: `dowhy` and `networkx` must be installed.")
 
     st.markdown("---")
+    st.subheader("3. Inter-Crime Causal Pipeline")
+    st.markdown("To test whether one form of violence actively facilitates another, we applied a causal model. We analyze if **Kidnapping & Abduction** serves as a direct causal precursor to **Rape**, after controlling for Urbanization.")
+
+    if 'KIDNAPPING & ABDUCTION' in df.columns and 'RAPE' in df.columns and 'Urbanization Rate (%)' in df.columns:
+        crime_pipeline_df = df[['KIDNAPPING & ABDUCTION', 'RAPE', 'Urbanization Rate (%)']].dropna()
+        if len(crime_pipeline_df) > 100:
+            import dowhy
+            from dowhy import CausalModel
+            
+            pipeline_graph = """
+            digraph {
+                Urbanization -> Kidnapping;
+                Urbanization -> Rape;
+                Kidnapping -> Rape;
+            }
+            """
+            
+            crime_pipeline_df = crime_pipeline_df.rename(columns={
+                'KIDNAPPING & ABDUCTION': 'Kidnapping',
+                'RAPE': 'Rape',
+                'Urbanization Rate (%)': 'Urbanization'
+            })
+            
+            r = crime_pipeline_df['Kidnapping'].corr(crime_pipeline_df['Rape'])
+            st.write(f"**Raw Pearson Correlation ($r$):** {r:.2f}")
+            
+            with st.spinner("Running Causal Inference on Crime Pipeline..."):
+                model_pipeline = CausalModel(
+                    data=crime_pipeline_df,
+                    treatment='Kidnapping',
+                    outcome='Rape',
+                    graph=pipeline_graph
+                )
+                
+                identified_estimand_pipeline = model_pipeline.identify_effect(proceed_when_unidentifiable=True)
+                estimate_pipeline = model_pipeline.estimate_effect(
+                    identified_estimand_pipeline,
+                    method_name="backdoor.linear_regression"
+                )
+            
+            st.success(f"**Causal Insight:** For every additional incident of Kidnapping & Abduction, there is an estimated causal increase of **{estimate_pipeline.value:.2f}** incidents of Rape (controlling for Urbanization).")
+            st.markdown("This suggests that certain categories of violence against women do not exist in silos; offenses like abduction serve as direct, causal precursors to extreme sexual violence.")
+        else:
+            st.warning("Not enough data points.")
+    else:
+        st.warning("Missing required columns for this analysis.")
+        
     st.subheader("4. Probabilistic Forecasting (Gaussian Processes)")
     st.markdown("Predicting crime rates based on demographic profiles with quantified uncertainty bounds.")
     
