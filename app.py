@@ -900,21 +900,30 @@ with tab7:
         
         infer = VariableElimination(bn_model)
         
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            u_sel = st.selectbox("Urbanization Level:", ['Low', 'Medium', 'High'], key='u_sel')
-        with c2:
-            l_sel = st.selectbox("Literacy Gap Level:", ['Low', 'Medium', 'High'], key='l_sel')
+        st.markdown("**All Possible Risk Scenarios:** Probability of High Crime for every combination.")
+        import itertools
+        
+        levels = ['Low', 'Medium', 'High']
+        results = []
+        
+        for u, l in itertools.product(levels, levels):
+            prob = infer.query(variables=['Crime_Level'], evidence={'Urban_Level': u, 'LitGap_Level': l})
+            p_high = prob.values[2]
+            results.append({
+                'Urbanization': u,
+                'Literacy Gap': l,
+                'P(Crime = High)': p_high
+            })
             
-        prob = infer.query(variables=['Crime_Level'], evidence={'Urban_Level': u_sel, 'LitGap_Level': l_sel})
+        results_df = pd.DataFrame(results)
         
-        # Extract probabilities
-        p_low = prob.values[0]
-        p_med = prob.values[1]
-        p_high = prob.values[2]
+        # Pivot table for better display
+        pivot_df = results_df.pivot(index='Urbanization', columns='Literacy Gap', values='P(Crime = High)')
+        # Reorder to Low, Medium, High
+        pivot_df = pivot_df.reindex(index=['Low', 'Medium', 'High'], columns=['Low', 'Medium', 'High'])
         
-        with c3:
-            st.metric("P(Crime = High)", f"{p_high:.1%}")
+        # Format as percentage
+        st.dataframe(pivot_df.style.format("{:.1%}").background_gradient(cmap='Reds', axis=None), use_container_width=True)
             
         # Plot probabilities
         import plotly.express as px
